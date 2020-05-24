@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
+use std::rc::Rc;
 
 pub trait Renderer {
     fn render_quad(
@@ -87,7 +88,6 @@ pub struct Rectangle {
 pub struct RectangleBuilder {
     pub color: Color,
     pub border_radius: f64,
-    pub id: usize,
 }
 
 impl Rectangle {
@@ -95,7 +95,6 @@ impl Rectangle {
         RectangleBuilder {
             color,
             border_radius: 0.0,
-            id: COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
         }
     }
 }
@@ -106,10 +105,10 @@ impl RectangleBuilder {
         self
     }
 
-    pub fn build(self) -> Box<dyn Widget> {
-        Box::new(Rectangle {
+    pub fn build(self) -> Rc<dyn Widget> {
+        Rc::new(Rectangle {
             color: self.color,
-            id: self.id,
+            id: COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             border_radius: self.border_radius,
         })
     }
@@ -120,34 +119,32 @@ pub struct Empty {
 }
 
 impl Empty {
-    pub fn new() -> Box<dyn Widget> {
-        Box::new(Empty {
+    pub fn new() -> Rc<dyn Widget> {
+        Rc::new(Empty {
             id: COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
         })
     }
 }
 
 pub struct Button {
-    pub background: Box<dyn Widget>,
-    pub click_callback: Option<Box<dyn Fn(u8) -> ()>>,
-    pub release_callback: Option<Box<dyn Fn(u8) -> ()>>,
+    pub background: Rc<dyn Widget>,
+    pub click_callback: Option<Rc<dyn Fn(u8) -> ()>>,
+    pub release_callback: Option<Rc<dyn Fn(u8) -> ()>>,
     pub id: usize,
 }
 
 pub struct ButtonBuilder {
-    background: Box<dyn Widget>,
+    background: Rc<dyn Widget>,
     border_radius: f64,
-    click_callback: Option<Box<dyn Fn(u8) -> ()>>,
-    release_callback: Option<Box<dyn Fn(u8) -> ()>>,
-    id: usize,
+    click_callback: Option<Rc<dyn Fn(u8) -> ()>>,
+    release_callback: Option<Rc<dyn Fn(u8) -> ()>>,
 }
 
 impl Button {
-    pub fn new(background: Box<dyn Widget>) -> ButtonBuilder {
+    pub fn new(background: Rc<dyn Widget>) -> ButtonBuilder {
         ButtonBuilder {
             background,
             border_radius: 0.0,
-            id: COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             click_callback: None,
             release_callback: None,
         }
@@ -156,11 +153,11 @@ impl Button {
 
 impl ButtonBuilder {
     pub fn on_click(mut self, on_click: impl Fn(u8) -> () + 'static) -> Self {
-        self.click_callback = Some(Box::new(on_click));
+        self.click_callback = Some(Rc::new(on_click));
         self
     }
 
-    pub fn on_release(mut self, on_release: Box<dyn Fn(u8) -> ()>) -> Self {
+    pub fn on_release(mut self, on_release: Rc<dyn Fn(u8) -> ()>) -> Self {
         self.release_callback = Some(on_release);
         self
     }
@@ -170,10 +167,10 @@ impl ButtonBuilder {
         self
     }
 
-    pub fn build(self) -> Box<dyn Widget> {
-        Box::new(Button {
+    pub fn build(self) -> Rc<dyn Widget> {
+        Rc::new(Button {
             background: self.background,
-            id: self.id,
+            id: COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             click_callback: self.click_callback,
             release_callback: self.release_callback,
         })
@@ -182,21 +179,19 @@ impl ButtonBuilder {
 
 pub struct Padding {
     pub padding: (f64, f64, f64, f64),
-    pub child: Box<dyn Widget>,
+    pub child: Rc<dyn Widget>,
     pub id: usize,
 }
 
 pub struct PaddingBuilder {
     pub padding: (f64, f64, f64, f64),
-    pub child: Box<dyn Widget>,
-    pub id: usize,
+    pub child: Rc<dyn Widget>,
 }
 
 impl Padding {
-    pub fn new(child: Box<dyn Widget>) -> PaddingBuilder {
+    pub fn new(child: Rc<dyn Widget>) -> PaddingBuilder {
         PaddingBuilder {
             child,
-            id: COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             padding: (0.0, 0.0, 0.0, 0.0),
         }
     }
@@ -218,29 +213,101 @@ impl PaddingBuilder {
         self
     }
 
-    pub fn build(self) -> Box<dyn Widget> {
-        Box::new(Padding {
+    pub fn build(self) -> Rc<dyn Widget> {
+        Rc::new(Padding {
             child: self.child,
             padding: self.padding,
-            id: self.id,
+            id: COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
         })
     }
 }
 
 pub struct Row {
-    pub children: Vec<Box<dyn Widget>>,
-    pub flex: Option<Vec<usize>>,
+    pub children: Vec<Rc<dyn Widget>>,
+    pub flex: Vec<usize>,
     pub id: usize,
+}
+
+pub struct RowBuilder {
+    pub children: Vec<Rc<dyn Widget>>,
+    pub flex: Vec<usize>,
+}
+
+impl Row {
+    pub fn new() -> RowBuilder {
+        RowBuilder {
+            children: Vec::new(),
+            flex: Vec::new(),
+        }
+    }
+}
+
+impl RowBuilder {
+    pub fn add(mut self, child: Rc<dyn Widget>) -> Self {
+        self.children.push(child);
+        self.flex.push(1);
+        self
+    }
+
+    pub fn add_flex(mut self, child: Rc<dyn Widget>, flex: usize) -> Self {
+        self.children.push(child);
+        self.flex.push(flex);
+        self
+    }
+
+    pub fn build(self) -> Rc<dyn Widget> {
+        Rc::new(Row {
+            children: self.children,
+            flex: self.flex,
+            id: COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        })
+    }
 }
 
 pub struct Column {
-    pub children: Vec<Box<dyn Widget>>,
-    pub flex: Option<Vec<usize>>,
+    pub children: Vec<Rc<dyn Widget>>,
+    pub flex: Vec<usize>,
     pub id: usize,
 }
 
+pub struct ColumnBuilder {
+    pub children: Vec<Rc<dyn Widget>>,
+    pub flex: Vec<usize>,
+}
+
+impl Column {
+    pub fn new() -> ColumnBuilder {
+        ColumnBuilder {
+            children: Vec::new(),
+            flex: Vec::new(),
+        }
+    }
+}
+
+impl ColumnBuilder {
+    pub fn add(mut self, child: Rc<dyn Widget>) -> Self {
+        self.children.push(child);
+        self.flex.push(1);
+        self
+    }
+
+    pub fn add_flex(mut self, child: Rc<dyn Widget>, flex: usize) -> Self {
+        self.children.push(child);
+        self.flex.push(flex);
+        self
+    }
+
+    pub fn build(self) -> Rc<dyn Widget> {
+        Rc::new(Column {
+            children: self.children,
+            flex: self.flex,
+            id: COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        })
+    }
+}
+
 pub struct Stack {
-    pub children: Vec<Box<dyn Widget>>,
+    pub children: Vec<Rc<dyn Widget>>,
     pub id: usize,
 }
 
@@ -251,7 +318,7 @@ pub mod widgets {
 
 pub static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-pub fn compute(tree: &Box<dyn Widget>, width: f64, height: f64) -> HashMap<usize, ComputedWidget> {
+pub fn compute(tree: &Rc<dyn Widget>, width: f64, height: f64) -> HashMap<usize, ComputedWidget> {
     let mut elem_map = HashMap::new();
     tree.compute(0.0, 0.0, 0, width, height, &mut elem_map);
     elem_map
@@ -422,19 +489,11 @@ impl Widget for Row {
         height: f64,
         map: &mut HashMap<usize, ComputedWidget>,
     ) {
-        let total_len = if let Some(flex) = &self.flex {
-            flex.iter().sum::<usize>()
-        } else {
-            self.children.len()
-        };
+        let total_len = self.flex.iter().sum::<usize>();
         let each_child_width = width / total_len as f64;
         let mut prev_flex = 0;
         self.children.iter().enumerate().for_each(|(i, child)| {
-            let flex = if let Some(flex) = &self.flex {
-                flex[i]
-            } else {
-                1
-            };
+            let flex = self.flex[i];
             let offset = prev_flex as f64 * each_child_width;
             prev_flex += flex;
             child.compute(
@@ -508,19 +567,11 @@ impl Widget for Column {
         height: f64,
         map: &mut HashMap<usize, ComputedWidget>,
     ) {
-        let total_len = if let Some(flex) = &self.flex {
-            flex.iter().sum::<usize>()
-        } else {
-            self.children.len()
-        };
+        let total_len = self.flex.iter().sum::<usize>();
         let each_child_height = height / total_len as f64;
         let mut prev_flex = 0;
         self.children.iter().enumerate().for_each(|(i, child)| {
-            let flex = if let Some(flex) = &self.flex {
-                flex[i]
-            } else {
-                1
-            };
+            let flex = self.flex[i];
             let offset = prev_flex as f64 * each_child_height;
             prev_flex += flex;
             child.compute(

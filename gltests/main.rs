@@ -6,7 +6,7 @@ use glutin::NotCurrent;
 use glutin::WindowedContext;
 
 pub fn run<F: FnOnce() -> Box<dyn Renderer>>(
-    tree: Box<dyn Widget>,
+    tree: Rc<dyn Widget>,
     get_renderer: F,
     start_width: f64,
     start_height: f64,
@@ -107,16 +107,46 @@ use winkel::widgets::*;
 use winkel::Event as WinkelEvent;
 use winkel::GlRenderer;
 use winkel::Renderer;
+use std::rc::Rc;
 
 fn main() {
-    let tree: Box<dyn Widget> = Padding::new(
-        Button::new(Rectangle::new(colors::RED).border(50.0).build())
-            .on_click(|_| {
-                println!("Clicked!");
-            })
+    let rect1_state: &mut Rc<dyn Widget>;
+    let tree: Rc<dyn Widget> = Row::new()
+        .add(
+            Padding::new(
+                Row::new()
+                    .add(
+                        Button::new(Rectangle::new(colors::RED).border(50.0).build())
+                            .on_click(|_| {
+                                println!("Clicked red!");
+                            })
+                            .build(),
+                    )
+                    .add_flex(
+                        Button::new(Rectangle::new(colors::YELLOW).border(20.0).build())
+                            .on_click(|_| {
+                                println!("Clicked yellow!");
+                            })
+                            .build(),
+                        2,
+                    )
+                    .build(),
+            )
+            .symmetrical(20.0, 30.0)
             .build(),
-    )
-    .symmetrical(20.0, 30.0)
-    .build();
+        )
+        .add(
+            Padding::new(
+                Button::new(Rectangle::new(colors::GREEN).border(50.0).build())
+                    .on_click(|_| {
+                        println!("Clicked green!");
+                    })
+                    .border(50.0)
+                    .build(),
+            )
+            .symmetrical(20.0, 30.0)
+            .build(),
+        )
+        .build();
     run(tree, || Box::new(GlRenderer::new()), 1024.0, 768.0, "Test");
 }

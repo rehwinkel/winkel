@@ -1,152 +1,180 @@
 use gl;
-use glutin::event::{ElementState, MouseButton};
-use glutin::event::{Event, WindowEvent};
-use glutin::event_loop::ControlFlow;
-use glutin::NotCurrent;
-use glutin::WindowedContext;
+use glfw::{Action, Context};
 
-pub fn run<F: FnOnce() -> Box<dyn Renderer>>(
-    tree: Rc<dyn Widget>,
+pub fn run<'a, F: FnOnce() -> Box<dyn Renderer>>(
+    tree: Rc<RefCell<dyn Widget<'a> + 'a>>,
     get_renderer: F,
-    start_width: f64,
-    start_height: f64,
+    start_width: u32,
+    start_height: u32,
     title: &str,
 ) {
-    let el = glutin::event_loop::EventLoop::new();
-    let wb = glutin::window::WindowBuilder::new()
-        .with_title(title)
-        .with_inner_size(glutin::dpi::LogicalSize::new(start_width, start_height));
-    let windowed_context: WindowedContext<NotCurrent> = glutin::ContextBuilder::new()
-        .with_double_buffer(Some(true))
-        .with_gl(glutin::GlRequest::Latest)
-        .with_multisampling(16)
-        .build_windowed(wb, &el)
-        .unwrap();
-    let windowed_context = unsafe { windowed_context.make_current() }.unwrap();
-    gl::load_with(|s| windowed_context.get_proc_address(s));
+    let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
 
-    let renderer: Box<dyn Renderer> = get_renderer();
+    let (mut window, events) = glfw
+        .create_window(start_width, start_height, title, glfw::WindowMode::Windowed)
+        .expect("Failed to create GLFW window.");
+
+    window.make_current();
+    gl::load_with(|s| window.get_proc_address(s));
+
+    let mut renderer: Box<dyn Renderer> = get_renderer();
 
     let mut mouse_x: f64 = 0.0;
     let mut mouse_y: f64 = 0.0;
+    let mut win_width: f64 = start_width as f64;
+    let mut win_height: f64 = start_height as f64;
 
-    let mut computed = compute(&tree, start_width, start_height);
+    let mut computed = compute(&tree, start_width as f64, start_height as f64);
 
-    el.run(move |event, _, control_flow| match event {
-        Event::WindowEvent {
-            window_id: _,
-            event,
-        } => match event {
-            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-            WindowEvent::Resized(sz) => {
-                windowed_context.resize(sz);
-                unsafe { gl::Viewport(0, 0, sz.width as i32, sz.height as i32) };
-                computed = compute(&tree, sz.width as f64, sz.height as f64);
-            }
-            WindowEvent::MouseInput {
-                device_id: _,
-                state,
-                button,
-                modifiers: _,
-            } => {
-                let button = match button {
-                    MouseButton::Left => 0,
-                    MouseButton::Middle => 1,
-                    MouseButton::Right => 2,
-                    MouseButton::Other(v) => v,
-                };
-                match state {
-                    ElementState::Pressed => {
-                        tree.dispatch(
+    window.set_mouse_button_polling(true);
+    window.set_cursor_pos_polling(true);
+    window.set_size_polling(true);
+    window.set_cursor_enter_polling(true);
+
+    while !window.should_close() {
+        unsafe {
+            gl::ClearColor(1.0, 1.0, 1.0, 1.0);
+            gl::Clear(gl::COLOR_BUFFER_BIT);
+        }
+        renderer.render(&computed, win_width, win_height);
+        window.swap_buffers();
+
+        glfw.poll_events();
+        for (_, event) in glfw::flush_messages(&events) {
+            match event {
+                glfw::WindowEvent::CursorEnter(entered) => {
+                    if !entered {
+                        if tree
+                            .borrow()
+                            .dispatch(
+                                WinkelEvent::MouseMove {
+                                    prev_x: mouse_x,
+                                    prev_y: mouse_y,
+                                    x: -1.0,
+                                    y: -1.0,
+                                },
+                                false,
+                                &computed,
+                            )
+                            .1
+                        {
+                            computed = compute(&tree, win_width, win_height);
+                        }
+                        mouse_x = -1.0;
+                        mouse_y = -1.0;
+                    }
+                }
+                glfw::WindowEvent::CursorPos(x, y) => {
+                    if tree
+                        .borrow()
+                        .dispatch(
+                            WinkelEvent::MouseMove {
+                                prev_x: mouse_x,
+                                prev_y: mouse_y,
+                                x,
+                                y,
+                            },
+                            false,
+                            &computed,
+                        )
+                        .1
+                    {
+                        computed = compute(&tree, win_width, win_height);
+                    }
+                    mouse_x = x;
+                    mouse_y = y;
+                }
+                glfw::WindowEvent::MouseButton(button, Action::Press, _) => {
+                    if tree
+                        .borrow()
+                        .dispatch(
                             WinkelEvent::MouseDown {
                                 x: mouse_x,
                                 y: mouse_y,
-                                button,
+                                button: button as i32 as u8,
                             },
+                            false,
                             &computed,
-                        );
+                        )
+                        .1
+                    {
+                        computed = compute(&tree, win_width, win_height);
                     }
-                    ElementState::Released => {
-                        tree.dispatch(
+                }
+                glfw::WindowEvent::MouseButton(button, Action::Release, _) => {
+                    if tree
+                        .borrow()
+                        .dispatch(
                             WinkelEvent::MouseUp {
                                 x: mouse_x,
                                 y: mouse_y,
-                                button,
+                                button: button as i32 as u8,
                             },
+                            false,
                             &computed,
-                        );
+                        )
+                        .1
+                    {
+                        computed = compute(&tree, win_width, win_height);
                     }
                 }
+                glfw::WindowEvent::Size(width, height) => {
+                    win_width = width as f64;
+                    win_height = height as f64;
+                    unsafe {
+                        gl::Viewport(0, 0, width, height);
+                    };
+                    computed = compute(&tree, width as f64, height as f64);
+                }
+                _ => {}
             }
-            WindowEvent::CursorMoved {
-                device_id: _,
-                position,
-                modifiers: _,
-            } => {
-                mouse_x = position.x;
-                mouse_y = position.y;
-            }
-            _ => {}
-        },
-        Event::RedrawRequested(_window_id) => {
-            unsafe {
-                gl::ClearColor(1.0, 1.0, 1.0, 1.0);
-                gl::Clear(gl::COLOR_BUFFER_BIT);
-            }
-            let sz = windowed_context.window().inner_size();
-            renderer.render(&computed, sz.width as f64, sz.height as f64);
-            windowed_context.swap_buffers().unwrap();
         }
-        _ => {}
-    });
+        unsafe {
+            gl::ClearColor(1.0, 1.0, 1.0, 1.0);
+            gl::Clear(gl::COLOR_BUFFER_BIT);
+        }
+        renderer.render(&computed, win_width, win_height);
+        window.swap_buffers();
+    }
 }
 
-use winkel::colors;
+use std::cell::RefCell;
+use std::rc::Rc;
+use winkel::color;
 use winkel::compute;
 use winkel::widgets::*;
 use winkel::Event as WinkelEvent;
 use winkel::GlRenderer;
 use winkel::Renderer;
-use std::rc::Rc;
+use winkel::State;
 
 fn main() {
-    let rect1_state: &mut Rc<dyn Widget>;
-    let tree: Rc<dyn Widget> = Row::new()
-        .add(
-            Padding::new(
-                Row::new()
+    let mut button1: State<Rectangle> = State::new();
+    let tree: Rc<RefCell<dyn Widget>> = Padding::new(
+        Button::new(color::RED)
+            .border(20.0)
+            .child(
+                Column::new()
                     .add(
-                        Button::new(Rectangle::new(colors::RED).border(50.0).build())
-                            .on_click(|_| {
-                                println!("Clicked red!");
-                            })
+                        Text::new("Hello World", 20, "Raleway-Regular.ttf")
+                            .color(color::BLUE)
                             .build(),
                     )
-                    .add_flex(
-                        Button::new(Rectangle::new(colors::YELLOW).border(20.0).build())
-                            .on_click(|_| {
-                                println!("Clicked yellow!");
-                            })
+                    .add(
+                        Text::new("Hello World 2", 54, "Raleway-Regular.ttf")
+                            .color(color::MAGENTA)
                             .build(),
-                        2,
                     )
                     .build(),
             )
-            .symmetrical(20.0, 30.0)
-            .build(),
-        )
-        .add(
-            Padding::new(
-                Button::new(Rectangle::new(colors::GREEN).border(50.0).build())
-                    .on_click(|_| {
-                        println!("Clicked green!");
-                    })
-                    .border(50.0)
-                    .build(),
-            )
-            .symmetrical(20.0, 30.0)
-            .build(),
-        )
-        .build();
-    run(tree, || Box::new(GlRenderer::new()), 1024.0, 768.0, "Test");
+            .on_pressed(|_| {
+                println!("Clicked!");
+            })
+            .hover(color::YELLOW)
+            .active(color::GREEN)
+            .build_state(&mut button1),
+    )
+    .all(30.0)
+    .build();
+    run(tree, || Box::new(GlRenderer::new()), 1024, 768, "Test");
 }
